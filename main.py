@@ -7,6 +7,11 @@ import soundfile as sf
 import torch
 from transformers import AutoModel
 from huggingface_hub import list_repo_files, hf_hub_download
+from aksharamukha import transliterate
+
+
+
+# print(result)
 
 print("Starting...")
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -43,9 +48,17 @@ print("Model is on:", device)
 
 print("Generating...")
 t = time.time()
+
+text = "mera naam vinit hai"
+
+result = transliterate.process(
+    "HK",
+    "Devanagari",
+    text
+)
 audio = model(
-    "आज सर्व शिक्षा अभियान चे सर्व कर्मचारी पर्मनंट झालेत.",
-    ref_audio_path="vivek.wav",
+    result,
+    ref_audio_path="mar.wav",
     ref_text="अरे call चालू छै अजून?"
 )
 print("Generated in", round(time.time() - t, 2), "s")
