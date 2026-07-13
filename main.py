@@ -5,6 +5,8 @@ import argparse
 import time
 from pathlib import Path
 
+from asr import transcribe_audio
+
 HINDI_REF_TEXT = "चीन में मोबाइल फ़ोन की लत के कारण एक युवक बड़ी मुसीबत में फँस गया।"
 MARATHI_REF_TEXT = "भावा, डिझेल से धर घसरलेत वाटायत हो देयत, पुलकुरु तक्तक की."
 SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
@@ -81,6 +83,32 @@ def resolve_language_settings(language=None, ref_audio=None, ref_text=None):
     return lang, resolved_audio, resolved_text
 
 
+def ask_for_custom_voice(lang, ref_audio=None, ref_text=None):
+    choice = input("Do you want to use a custom voice/reference audio? [y/n]: ").strip().lower()
+    if choice not in {"y", "yes", "1", "true"}:
+        return False, ref_audio, ref_text
+
+    custom_audio = input("Enter the reference audio path (press Enter to use the default sample): ").strip()
+    if custom_audio:
+        resolved_audio = resolve_audio_path(custom_audio)
+    else:
+        resolved_audio = resolve_audio_path(ref_audio)
+
+    if ref_text and str(ref_text).strip():
+        return True, resolved_audio, ref_text
+
+    asr_language = "hi" if lang == "hindi" else "mr"
+    try:
+        print("Transcribing reference audio with ASR...")
+        transcript = transcribe_audio(resolved_audio, language=asr_language)
+        print("ASR transcript:", transcript)
+        return True, resolved_audio, transcript
+    except Exception as exc:
+        print(f"ASR transcription failed: {exc}")
+        fallback_text = HINDI_REF_TEXT if lang == "hindi" else MARATHI_REF_TEXT
+        return True, resolved_audio, fallback_text
+
+
 def main():
     import numpy as np
     import soundfile as sf
@@ -95,7 +123,9 @@ def main():
 
     text = resolve_text_input(args.text)
     lang, ref_audio, ref_text = resolve_language_settings(args.lang, args.ref_audio, args.ref_text)
+    use_custom_voice, ref_audio, ref_text = ask_for_custom_voice(lang, ref_audio, ref_text)
     print(f"Selected language: {lang}")
+    print(f"Using custom voice: {use_custom_voice}")
     print(f"Using reference audio: {ref_audio}")
     print(f"Using reference text: {ref_text}")
 

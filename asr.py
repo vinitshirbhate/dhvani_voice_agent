@@ -1,53 +1,39 @@
+from functools import lru_cache
+
 import torch
-import librosa
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
 
-import transformers
+DEFAULT_MODEL_NAME = "openai/whisper-small"
 
 
-# Device
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print("Using:", DEVICE)
-
-# Load multilingual Whisper model
-MODEL_NAME = "openai/whisper-small"
-
-processor = WhisperProcessor.from_pretrained(MODEL_NAME)
-model = WhisperForConditionalGeneration.from_pretrained(MODEL_NAME).to(DEVICE)
-
-# Load audio (Whisper expects 16 kHz mono)
-audio, sr = librosa.load("gemma_tts\samples\hindi.wav", sr=16000, mono=True)
-
-print(f"Sample rate: {sr}")
-print(f"Duration: {len(audio)/sr:.2f} seconds")
-
-# Create input features
-inputs = processor(
-    audio,
-    sampling_rate=16000,
-    return_tensors="pt"
-)
-
-input_features = inputs.input_features.to(DEVICE)
-
-# Generate Marathi transcription
-predicted_ids = model.generate(
-    input_features,
-    language="mr",
-    task="transcribe"
-)
-
-# Decode
-transcription = processor.batch_decode(
-    predicted_ids,
-    skip_special_tokens=True
-)[0]
-
-print("\nTranscription:")
-print(transcription)
+def get_default_device():
+    try:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
 
 
-print("Transformers:", transformers.__version__)
-print("Torch:", torch.__version__)
-print("Duration:", len(audio)/sr)
-print("Model:", MODEL_NAME)
+@lru_cache(maxsize=1)
+def load_whisper_model(model_name=DEFAULT_MODEL_NAME, device=None):
+    from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+    resolved_device = device or get_default_device()
+    processor = WhisperProcessor.from_pretrained(model_name)
+    model = WhisperForConditionalGeneration.from_pretrained(model_name).to(resolved_device)
+    return processor, model, resolved_device
+
+
+def transcribe_audio(audio_path, language=None, model_name=DEFAULT_MODEL_NAME, device=None):
+    import librosa
+
+    processor, model, resolved_device = load_whisper_model(model_name=model_name, device=device)
+
+    audio, sr = librosa.load(audio_path, sr=16000, mono=True)
+    inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
+    input_features = inputs.input_features.to(resolved_device)
+
+    generate_kwargs = {"task": "transcribe"}
+    if language:
+        generate_kwargs["language"] = language
+
+    predicted_ids = model.generate(input_features, **generate_kwargs)
+    return processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
