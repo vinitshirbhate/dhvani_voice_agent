@@ -91,22 +91,22 @@ def ask_for_custom_voice(lang, ref_audio=None, ref_text=None):
     custom_audio = input("Enter the reference audio path (press Enter to use the default sample): ").strip()
     if custom_audio:
         resolved_audio = resolve_audio_path(custom_audio)
+        # When custom audio is provided, always transcribe it with ASR
+        asr_language = "hi" if lang == "hindi" else "mr"
+        try:
+            print("Transcribing custom audio with ASR...")
+            transcript = transcribe_audio(resolved_audio, language=asr_language)
+            print("ASR transcript:", transcript)
+            return True, resolved_audio, transcript
+        except Exception as exc:
+            print(f"ASR transcription failed: {exc}")
+            fallback_text = HINDI_REF_TEXT if lang == "hindi" else MARATHI_REF_TEXT
+            return True, resolved_audio, fallback_text
     else:
+        # No custom audio, use defaults
         resolved_audio = resolve_audio_path(ref_audio)
-
-    if ref_text and str(ref_text).strip():
-        return True, resolved_audio, ref_text
-
-    asr_language = "hi" if lang == "hindi" else "mr"
-    try:
-        print("Transcribing reference audio with ASR...")
-        transcript = transcribe_audio(resolved_audio, language=asr_language)
-        print("ASR transcript:", transcript)
-        return True, resolved_audio, transcript
-    except Exception as exc:
-        print(f"ASR transcription failed: {exc}")
-        fallback_text = HINDI_REF_TEXT if lang == "hindi" else MARATHI_REF_TEXT
-        return True, resolved_audio, fallback_text
+        resolved_text = ref_text or (HINDI_REF_TEXT if lang == "hindi" else MARATHI_REF_TEXT)
+        return True, resolved_audio, resolved_text
 
 
 def main():
