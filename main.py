@@ -2,6 +2,8 @@ import os
 os.environ["TORCHDYNAMO_DISABLE"] = "1"
 
 import argparse
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -56,6 +58,38 @@ def resolve_audio_path(ref_audio):
     return str(path)
 
 
+def convert_to_wav_if_needed(audio_path):
+    if audio_path is None:
+        return None
+
+    path = Path(audio_path)
+    if path.suffix.lower() == ".wav":
+        return str(path)
+
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("ffmpeg is required to convert audio files to WAV format. Please install ffmpeg and try again.")
+
+    if not path.exists():
+        raise FileNotFoundError(f"Reference audio file not found: {path}")
+
+    wav_path = path.with_suffix(".wav")
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(path),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+        str(wav_path),
+    ]
+    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return str(wav_path)
+
+
 def resolve_text_input(text):
     if text and str(text).strip():
         return str(text).strip()
@@ -91,6 +125,7 @@ def ask_for_custom_voice(lang, ref_audio=None, ref_text=None):
     custom_audio = input("Enter the reference audio path (press Enter to use the default sample): ").strip()
     if custom_audio:
         resolved_audio = resolve_audio_path(custom_audio)
+        resolved_audio = convert_to_wav_if_needed(resolved_audio)
         # When custom audio is provided, always transcribe it with ASR
         asr_language = "hi" if lang == "hindi" else "mr"
         try:
@@ -105,6 +140,7 @@ def ask_for_custom_voice(lang, ref_audio=None, ref_text=None):
     else:
         # No custom audio, use defaults
         resolved_audio = resolve_audio_path(ref_audio)
+        resolved_audio = convert_to_wav_if_needed(resolved_audio)
         resolved_text = ref_text or (HINDI_REF_TEXT if lang == "hindi" else MARATHI_REF_TEXT)
         return True, resolved_audio, resolved_text
 
@@ -124,6 +160,7 @@ def main():
     text = resolve_text_input(args.text)
     lang, ref_audio, ref_text = resolve_language_settings(args.lang, args.ref_audio, args.ref_text)
     use_custom_voice, ref_audio, ref_text = ask_for_custom_voice(lang, ref_audio, ref_text)
+    ref_audio = convert_to_wav_if_needed(ref_audio)
     print(f"Selected language: {lang}")
     print(f"Using custom voice: {use_custom_voice}")
     print(f"Using reference audio: {ref_audio}")
