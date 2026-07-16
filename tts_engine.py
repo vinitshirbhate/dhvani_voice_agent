@@ -10,7 +10,8 @@ from safetensors.torch import load_file
 from transformers import AutoModel
 from f5_tts.infer.utils_infer import infer_process, preprocess_ref_audio_text
 
-from .config import DEVICE, NFE_STEP, REF_AUDIO_PATH, REF_TEXT, REPO_ID, SAMPLE_RATE
+from .asr import transcribe_audio
+from .config import ASR_ENABLED, ASR_LANGUAGE, ASR_MODEL_NAME, DEVICE, NFE_STEP, REF_AUDIO_PATH, REF_TEXT, REPO_ID, SAMPLE_RATE
 
 
 class TTSStreamEngine:
@@ -27,8 +28,25 @@ class TTSStreamEngine:
         self.model.eval()
         print("Model is on:", self.device)
 
+    def resolve_ref_text(self, ref_audio_path, ref_text=None, language=None):
+        if ref_text and str(ref_text).strip():
+            return str(ref_text).strip()
+        if not ASR_ENABLED or not ref_audio_path:
+            return REF_TEXT
+
+        try:
+            print("Transcribing reference audio with ASR...")
+            transcript = transcribe_audio(ref_audio_path, language=language or ASR_LANGUAGE, model_name=ASR_MODEL_NAME)
+            if transcript and str(transcript).strip():
+                return str(transcript).strip()
+        except Exception as exc:
+            print(f"ASR transcription failed for reference audio: {exc}")
+
+        return REF_TEXT
+
     def generate_fast(self, text, ref_audio_path=REF_AUDIO_PATH, ref_text=REF_TEXT, nfe_step=NFE_STEP, speed=1.0):
-        ref_audio, ref_text_processed = preprocess_ref_audio_text(ref_audio_path, ref_text)
+        resolved_ref_text = self.resolve_ref_text(ref_audio_path, ref_text)
+        ref_audio, ref_text_processed = preprocess_ref_audio_text(ref_audio_path, resolved_ref_text)
 
         audio, final_sample_rate, _ = infer_process(
             ref_audio,

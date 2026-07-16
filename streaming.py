@@ -5,7 +5,8 @@ import time
 import numpy as np
 import soundfile as sf
 
-from .config import SAMPLE_RATE, SAFETY_MARGIN
+from .asr import transcribe_audio
+from .config import ASR_ENABLED, ASR_LANGUAGE, ASR_MODEL_NAME, SAMPLE_RATE, SAFETY_MARGIN
 from .ollama_client import ollama_stream
 from .tts_engine import TTSStreamEngine
 
@@ -13,6 +14,23 @@ from .tts_engine import TTSStreamEngine
 class StreamSpeaker:
     def __init__(self):
         self.engine = TTSStreamEngine()
+
+    @staticmethod
+    def resolve_reference_text(ref_audio_path, ref_text=None, language=None):
+        if ref_text and str(ref_text).strip():
+            return str(ref_text).strip()
+        if not ASR_ENABLED or not ref_audio_path:
+            return ""
+
+        try:
+            print("Transcribing reference audio with ASR...")
+            transcript = transcribe_audio(ref_audio_path, language=language or ASR_LANGUAGE, model_name=ASR_MODEL_NAME)
+            if transcript and str(transcript).strip():
+                return str(transcript).strip()
+        except Exception as exc:
+            print(f"ASR transcription failed for reference audio: {exc}")
+
+        return ""
 
     @staticmethod
     def extract_completed_sentences(buffer):
@@ -35,6 +53,7 @@ class StreamSpeaker:
         return completed, buffer[start:]
 
     def speak_from_ollama(self, prompt, ref_audio_path, ref_text, nfe_step=16, safety_margin=SAFETY_MARGIN):
+        resolved_ref_text = self.resolve_reference_text(ref_audio_path, ref_text)
         all_chunks = []
         next_play_time = time.time()
         pending_text = ""
@@ -49,7 +68,7 @@ class StreamSpeaker:
                 audio, next_play_time = self.engine.speak_sentence(
                     sentence,
                     ref_audio_path=ref_audio_path,
-                    ref_text=ref_text,
+                    ref_text=resolved_ref_text,
                     nfe_step=nfe_step,
                     safety_margin=safety_margin,
                     next_play_time=next_play_time,
@@ -62,7 +81,7 @@ class StreamSpeaker:
             audio, next_play_time = self.engine.speak_sentence(
                 pending_text.strip(),
                 ref_audio_path=ref_audio_path,
-                ref_text=ref_text,
+                ref_text=resolved_ref_text,
                 nfe_step=nfe_step,
                 safety_margin=safety_margin,
                 next_play_time=next_play_time,
