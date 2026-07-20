@@ -4,6 +4,7 @@ conda create -n indicf5 python=3.10 -y
 conda activate indicf5
 pip install git+https://github.com/ai4bharat/IndicF5.git
 pip install -r requirements.txt
+conda env update -f environment.yml
 ```
 
 ## How To Use
