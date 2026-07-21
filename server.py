@@ -3,17 +3,20 @@ os.environ["TORCHDYNAMO_DISABLE"] = "1"
 
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from typing import Literal, Optional
+
 import numpy as np
 import soundfile as sf
 import torch
-from huggingface_hub import hf_hub_download, list_repo_files
-from transformers import AutoModel
 from aksharamukha import transliterate
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
+from huggingface_hub import hf_hub_download, list_repo_files
+from pydantic import BaseModel
+from transformers import AutoModel
 
 from asr import transcribe_audio
 
@@ -30,12 +33,13 @@ _model_lock = None
 
 class TTSRequest(BaseModel):
     text: str
-    lang: str = None
-    ref_audio: str = None
-    ref_text: str = None
+    audio_type: Literal["hindi", "marathi", "custom"] = "hindi"
+    lang: Optional[str] = None
+    ref_audio: Optional[str] = None
+    ref_text: Optional[str] = None
     output_path: str = "output.wav"
     sample_rate: int = 24000
-    device: str = None
+    device: Optional[str] = None
 
 
 def get_default_device():
@@ -46,15 +50,18 @@ def get_default_device():
         return "cpu"
 
 
-def normalize_language(language):
-    if language is None:
-        return None
-    lang = str(language).strip().lower()
-    if lang in {"h", "hi", "hin", "hindi"}:
+def normalize_audio_type(audio_type=None, language=None):
+    if audio_type is None and language is None:
         return "hindi"
-    if lang in {"m", "mr", "mar", "marathi"}:
+
+    value = str(audio_type or language or "hindi").strip().lower()
+    if value in {"h", "hi", "hin", "hindi"}:
+        return "hindi"
+    if value in {"m", "mr", "mar", "marathi"}:
         return "marathi"
-    raise ValueError("Please choose either hindi or marathi.")
+    if value in {"custom", "upload", "custom-audio"}:
+        return "custom"
+    raise ValueError("audio_type must be one of: hindi, marathi, custom.")
 
 
 def resolve_audio_path(ref_audio):
@@ -101,29 +108,47 @@ def convert_to_wav_if_needed(audio_path):
     return str(wav_path)
 
 
-def resolve_language_settings(language=None, ref_audio=None, ref_text=None):
-    lang = normalize_language(language)
-    if lang is None:
-        raise ValueError("Language must be specified (hindi or marathi)")
+def resolve_language_settings(audio_type=None, language=None, ref_audio=None, ref_text=None):
+    normalized_audio_type = normalize_audio_type(audio_type, language)
 
-    if lang == "hindi":
+    if normalized_audio_type == "custom":
+        resolved_audio = resolve_audio_path(ref_audio) if ref_audio else None
+        resolved_text = ref_text
+        return normalized_audio_type, resolved_audio, resolved_text
+
+    if normalized_audio_type == "hindi":
         resolved_audio = resolve_audio_path(ref_audio or "hindi.wav")
         resolved_text = ref_text or HINDI_REF_TEXT
     else:
         resolved_audio = resolve_audio_path(ref_audio or "mar.wav")
         resolved_text = ref_text or MARATHI_REF_TEXT
 
-    return lang, resolved_audio, resolved_text
+    return normalized_audio_type, resolved_audio, resolved_text
+
+
+def save_uploaded_audio(audio_file: UploadFile):
+    if audio_file is None or not getattr(audio_file, "filename", None):
+        return None
+
+    suffix = Path(audio_file.filename).suffix or ".wav"
+    temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+
+    with temp_path.open("wb") as out_file:
+        shutil.copyfileobj(audio_file.file, out_file)
+
+    return temp_path
 
 
 def load_model(repo_id: str = "ai4bharat/IndicF5", device: str = None):
     global _model
     if _model is not None:
         return _model
-    
+
     if device is None:
         device = get_default_device()
-    
+
     print("Loading model architecture...")
     _model = AutoModel.from_pretrained(repo_id, trust_remote_code=True)
 
@@ -151,7 +176,7 @@ def load_model(repo_id: str = "ai4bharat/IndicF5", device: str = None):
     _model = _model.to(device)
     _model.eval()
     print("Model is on:", device)
-    
+
     return _model
 
 
@@ -186,64 +211,111 @@ async def health():
 async def model_info():
     return {
         "model": "IndicF5",
+        "supported_audio_types": ["hindi", "marathi", "custom"],
         "supported_languages": ["hindi", "marathi"],
         "default_device": get_default_device()
     }
 
 
-@app.post("/synthesize")
-async def synthesize(request: TTSRequest):
+async def _parse_payload(request: Request):
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        data = {
+            "text": form.get("text"),
+            "audio_type": form.get("audio_type"),
+            "lang": form.get("lang"),
+            "ref_audio": form.get("ref_audio"),
+            "ref_text": form.get("ref_text"),
+            "output_path": form.get("output_path", "output.wav"),
+            "sample_rate": form.get("sample_rate", 24000),
+            "device": form.get("device"),
+        }
+        return data, form.get("audio_file")
+
+    payload = await request.json()
+    return payload, None
+
+
+async def _run_synthesis(request: Request, download_response: bool = False):
     try:
-        if not request.text:
+        payload, audio_file = await _parse_payload(request)
+        text = payload.get("text") or ""
+        if not text:
             raise HTTPException(status_code=400, detail="Text is required")
-        
-        # Resolve language settings
-        lang, ref_audio, ref_text = resolve_language_settings(
-            request.lang,
-            request.ref_audio,
-            request.ref_text
-        )
-        
-        # Convert audio to WAV if needed
-        ref_audio = convert_to_wav_if_needed(ref_audio)
-        
-        device = request.device or get_default_device()
-        
-        print(f"TTS Request: lang={lang}, text={request.text[:50]}...")
+
+        audio_type = normalize_audio_type(payload.get("audio_type"), payload.get("lang"))
+        ref_audio = payload.get("ref_audio")
+        ref_text = payload.get("ref_text")
+        output_path = payload.get("output_path") or "output.wav"
+        sample_rate = int(payload.get("sample_rate", 24000))
+        device = payload.get("device") or get_default_device()
+
+        if audio_type == "custom":
+            if audio_file is not None:
+                uploaded_path = save_uploaded_audio(audio_file)
+                try:
+                    ref_audio = convert_to_wav_if_needed(str(uploaded_path))
+                    ref_text = ref_text or transcribe_audio(ref_audio)
+                finally:
+                    if uploaded_path and uploaded_path.exists():
+                        uploaded_path.unlink(missing_ok=True)
+            elif ref_audio:
+                ref_audio = convert_to_wav_if_needed(ref_audio)
+            else:
+                raise ValueError("Custom audio mode requires an uploaded audio file or a valid ref_audio path.")
+
+            if not ref_text:
+                raise ValueError("Custom audio mode requires transcribed text. Please upload an audio file or provide ref_text.")
+        else:
+            _, ref_audio, ref_text = resolve_language_settings(
+                audio_type=audio_type,
+                language=payload.get("lang"),
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+            )
+            if ref_audio:
+                ref_audio = convert_to_wav_if_needed(ref_audio)
+
+        print(f"TTS Request: audio_type={audio_type}, text={text[:50]}...")
         print(f"Using reference audio: {ref_audio}")
         print(f"Using reference text: {ref_text}")
-        
-        # Load model
+
         model = load_model(device=device)
-        
-        # Generate audio
+
         print("Generating...")
         start_time = time.time()
-        
-        result = transliterate.process("HK", "Devanagari", request.text)
+
+        result = transliterate.process("HK", "Devanagari", text)
         audio = model(result, ref_audio_path=ref_audio, ref_text=ref_text)
-        
+
         generation_time = round(time.time() - start_time, 2)
         print(f"Generated in {generation_time}s")
-        
-        # Convert audio format if needed
+
         if audio.dtype == np.int16:
             audio = audio.astype(np.float32) / 32768.0
-        
-        # Save audio
-        output_path = request.output_path
-        sf.write(output_path, audio, samplerate=request.sample_rate)
-        print(f"Saved to {output_path}")
-        
+
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(output_file), audio, samplerate=sample_rate)
+        print(f"Saved to {output_file}")
+
+        if download_response:
+            return FileResponse(
+                str(output_file),
+                media_type="audio/wav",
+                filename=output_file.name,
+            )
+
         return {
             "status": "success",
             "message": "Audio generated successfully",
-            "output_path": output_path,
-            "language": lang,
+            "output_path": str(output_file),
+            "audio_type": audio_type,
             "generation_time_seconds": generation_time,
-            "sample_rate": request.sample_rate
+            "sample_rate": sample_rate,
         }
-    
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
@@ -253,64 +325,16 @@ async def synthesize(request: TTSRequest):
     except Exception as e:
         print(f"Error during TTS generation: {e}")
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
+
+
+@app.post("/synthesize")
+async def synthesize(request: Request):
+    return await _run_synthesis(request, download_response=False)
 
 
 @app.post("/synthesize-and-download")
-async def synthesize_and_download(request: TTSRequest):
-    try:
-        if not request.text:
-            raise HTTPException(status_code=400, detail="Text is required")
-        
-        # Resolve language settings
-        lang, ref_audio, ref_text = resolve_language_settings(
-            request.lang,
-            request.ref_audio,
-            request.ref_text
-        )
-        
-        # Convert audio to WAV if needed
-        ref_audio = convert_to_wav_if_needed(ref_audio)
-        
-        device = request.device or get_default_device()
-        
-        print(f"TTS Request: lang={lang}, text={request.text[:50]}...")
-        
-        # Load model
-        model = load_model(device=device)
-        
-        # Generate audio
-        print("Generating...")
-        start_time = time.time()
-        
-        result = transliterate.process("HK", "Devanagari", request.text)
-        audio = model(result, ref_audio_path=ref_audio, ref_text=ref_text)
-        
-        generation_time = round(time.time() - start_time, 2)
-        print(f"Generated in {generation_time}s")
-        
-        # Convert audio format if needed
-        if audio.dtype == np.int16:
-            audio = audio.astype(np.float32) / 32768.0
-        
-        # Save audio temporarily
-        output_path = request.output_path
-        sf.write(output_path, audio, samplerate=request.sample_rate)
-        
-        return FileResponse(
-            output_path,
-            media_type="audio/wav",
-            filename="output.wav"
-        )
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        print(f"Error during TTS generation: {e}")
-        raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
+async def synthesize_and_download(request: Request):
+    return await _run_synthesis(request, download_response=True)
 
 
 if __name__ == "__main__":
