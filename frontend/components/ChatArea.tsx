@@ -1,143 +1,98 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useRef } from 'react';
 
 interface ChatAreaProps {
-  messages: Array<{
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: Date;
-  }>;
-  isListening: boolean;
-  onToggleMicrophone: () => void;
-  onSendMessage: (message: string) => void;
+  text: string;
+  onTextChange: (text: string) => void;
   isLoading: boolean;
+  onSynthesize: () => void;
+  onDownload: () => void;
+  lastAudioPath: string;
+  error: string;
+  success: string;
 }
 
 export default function ChatArea({
-  messages,
-  isListening,
-  onToggleMicrophone,
-  onSendMessage,
+  text,
+  onTextChange,
   isLoading,
+  onSynthesize,
+  onDownload,
+  lastAudioPath,
+  error,
+  success,
 }: ChatAreaProps) {
-  const [inputText, setInputText] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const handleSend = () => {
-    if (inputText.trim()) {
-      onSendMessage(inputText);
-      setInputText('');
-    }
-  };
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
     <div className="flex-1 bg-gray-200 border-l-4 border-r-4 border-black flex flex-col p-6">
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto mb-6 flex flex-col gap-4">
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <h2 className="text-3xl font-bold text-gray-700 mb-2">Welcome to VĀNI AI</h2>
-            <p className="text-sm text-gray-600">Premium Voice Assistant for Indic Languages</p>
-          </div>
-        ) : (
-          <>
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}
-              >
-                <div
-                  className={`max-w-xs lg:max-w-md px-4 py-3 rounded-lg border-2 border-black ${
-                    msg.role === 'user'
-                      ? 'bg-yellow-300 text-black'
-                      : 'bg-gray-800 text-white'
-                  }`}
-                >
-                  <p className="text-sm">{msg.content}</p>
-                  <p className="text-xs mt-1 opacity-70">
-                    {msg.timestamp.toLocaleTimeString()}
-                  </p>
-                </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-800 text-white px-4 py-3 rounded-lg border-2 border-black">
-                  <div className="flex gap-2">
-                    <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-100"></div>
-                    <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-200"></div>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </>
-        )}
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-black mb-2">IndicF5 TTS</h1>
+        <p className="text-sm text-gray-700">Text-to-Speech for Hindi & Marathi</p>
       </div>
 
-      {/* Audio Visualization and Mic Button */}
-      <div className="flex flex-col items-center gap-4 mb-6">
-        <div className="flex items-center justify-center gap-1 h-8">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className={`w-1 rounded transition-all ${
-                isListening
-                  ? 'animate-pulse bg-black'
-                  : 'h-2 bg-black'
-              }`}
-              style={{
-                height: isListening ? '20px' : '10px',
-                animationDelay: `${i * 0.1}s`,
-              }}
-            />
-          ))}
+      {/* Status Messages */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-300 border-2 border-red-600 rounded text-red-900 text-sm font-semibold">
+          ❌ {error}
         </div>
+      )}
+      {success && (
+        <div className="mb-4 p-3 bg-green-300 border-2 border-green-600 rounded text-green-900 text-sm font-semibold">
+          ✅ {success}
+        </div>
+      )}
 
+      {/* Text Input Area */}
+      <div className="mb-6 flex-1 flex flex-col">
+        <label className="text-xs font-bold text-black mb-2 uppercase tracking-wider">Text to Synthesize</label>
+        <textarea
+          ref={textAreaRef}
+          value={text}
+          onChange={(e) => onTextChange(e.target.value)}
+          placeholder="Enter the text you want to convert to speech..."
+          className="flex-1 border-2 border-black bg-white text-black p-3 rounded font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-yellow-400"
+        />
+      </div>
+
+      {/* Audio Preview */}
+      {lastAudioPath && (
+        <div className="mb-6 p-4 bg-white border-2 border-black rounded">
+          <label className="text-xs font-bold text-black mb-3 block uppercase tracking-wider">Generated Audio Preview</label>
+          <audio
+            controls
+            className="w-full border-2 border-black rounded"
+          >
+            <source src={`/${lastAudioPath}`} type="audio/wav" />
+            Your browser does not support the audio element.
+          </audio>
+          <p className="text-xs text-gray-600 mt-2">📁 {lastAudioPath}</p>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="flex gap-3 items-center">
         <button
-          onClick={onToggleMicrophone}
-          className={`w-20 h-20 rounded-full border-2 border-black font-bold text-2xl transition-all transform flex items-center justify-center ${
-            isListening
-              ? 'bg-red-600 text-white scale-110 shadow-lg animate-pulse'
-              : 'bg-red-500 text-white hover:bg-red-600 hover:scale-105'
+          onClick={onSynthesize}
+          disabled={isLoading || !text.trim()}
+          className={`flex-1 font-bold py-3 px-4 rounded border-2 border-black transition-all uppercase text-sm ${
+            isLoading || !text.trim()
+              ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+              : 'bg-yellow-400 hover:bg-yellow-500 text-black hover:scale-105'
           }`}
         >
-          🎤
-        </button>
-
-        <p className="text-xs text-gray-600 font-semibold text-center">
-          {isListening ? 'Listening...' : 'Ready to listen...'}
-        </p>
-      </div>
-
-      {/* Text Input Section */}
-      <div className="flex gap-3 items-center">
-        <div className="flex-1 bg-white border-2 border-black rounded-lg px-3 py-2 flex items-center">
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Type your message here..."
-            className="flex-1 outline-none text-sm"
-          />
-        </div>
-        <button
-          onClick={handleSend}
-          disabled={isLoading}
-          className="bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 text-black font-bold py-2 px-4 rounded border-2 border-black transition-all"
-        >
-          ▶ Send
+          {isLoading ? '⏳ Generating...' : '🎵 Synthesize'}
         </button>
         <button
-          className="bg-white hover:bg-gray-100 text-black font-bold py-2 px-4 rounded border-2 border-black transition-all"
+          onClick={onDownload}
+          disabled={!lastAudioPath}
+          className={`flex-1 font-bold py-3 px-4 rounded border-2 border-black transition-all uppercase text-sm ${
+            !lastAudioPath
+              ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+              : 'bg-green-400 hover:bg-green-500 text-black hover:scale-105'
+          }`}
         >
           ⬇ Download
         </button>

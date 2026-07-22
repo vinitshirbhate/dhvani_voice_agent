@@ -5,126 +5,138 @@ import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import ParametersPanel from './ParametersPanel';
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
+interface SynthesisState {
+  text: string;
+  audioType: 'hindi' | 'marathi' | 'custom';
+  refAudio?: File;
+  refText?: string;
+  sampleRate: number;
+  device?: string;
+  outputPath: string;
 }
 
 export default function VaniAI() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isListening, setIsListening] = useState(false);
-  const [language, setLanguage] = useState('hi');
-  const [mfeSteps, setMfeSteps] = useState(32);
-  const [speechRate, setSpeechRate] = useState(1.0);
+  const [synthesisState, setSynthesisState] = useState<SynthesisState>({
+    text: '',
+    audioType: 'hindi',
+    sampleRate: 24000,
+    outputPath: 'output.wav',
+  });
   const [isLoading, setIsLoading] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const [lastAudioPath, setLastAudioPath] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [success, setSuccess] = useState<string>('');
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = false;
-        recognitionRef.current.interimResults = true;
-        recognitionRef.current.lang = language === 'mr' ? 'mr-IN' : 'hi-IN';
-      }
+  const handleSynthesizeAudio = async () => {
+    if (!synthesisState.text.trim()) {
+      setError('Please enter text to synthesize');
+      return;
     }
-  }, [language]);
 
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim()) return;
+    if (synthesisState.audioType === 'custom' && !synthesisState.refAudio && !synthesisState.refText) {
+      setError('Custom audio mode requires either a reference audio file or reference text');
+      return;
+    }
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
+    setError('');
+    setSuccess('');
 
     try {
-      const response = await fetch('/api/chat', {
+      const formData = new FormData();
+      formData.append('text', synthesisState.text);
+      formData.append('audio_type', synthesisState.audioType);
+      formData.append('output_path', synthesisState.outputPath);
+      formData.append('sample_rate', synthesisState.sampleRate.toString());
+      
+      if (synthesisState.refAudio) {
+        formData.append('audio_file', synthesisState.refAudio);
+      }
+      if (synthesisState.refText) {
+        formData.append('ref_text', synthesisState.refText);
+      }
+      if (synthesisState.device) {
+        formData.append('device', synthesisState.device);
+      }
+
+      const response = await fetch('http://localhost:8000/synthesize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          language,
-          mfe_steps: mfeSteps,
-          speech_rate: speechRate,
-        }),
+        body: formData,
       });
 
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Synthesis failed');
+      }
+
       const data = await response.json();
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.response || 'No response',
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+      setLastAudioPath(data.output_path);
+      setSuccess(`Audio generated successfully in ${data.generation_time_seconds}s`);
     } catch (error) {
-      console.error('Error sending message:', error);
+      setError(error instanceof Error ? error.message : 'Unknown error');
+      console.error('Error during synthesis:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const toggleMicrophone = () => {
-    if (!recognitionRef.current) {
-      alert('Speech Recognition not supported in this browser');
+  const handleDownloadAudio = async () => {
+    if (!lastAudioPath) {
+      setError('No audio generated yet');
       return;
     }
 
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      recognitionRef.current.start();
-      setIsListening(true);
+    try {
+      const response = await fetch('http://localhost:8000/synthesize-and-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: synthesisState.text,
+          audio_type: synthesisState.audioType,
+          output_path: synthesisState.outputPath,
+          sample_rate: synthesisState.sampleRate,
+          ref_text: synthesisState.refText,
+          device: synthesisState.device,
+        }),
+      });
 
-      recognitionRef.current.onresult = (event: any) => {
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            handleSendMessage(transcript);
-          } else {
-            interimTranscript += transcript;
-          }
-        }
-      };
+      if (!response.ok) throw new Error('Download failed');
 
-      recognitionRef.current.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'generated_audio.wav';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Download failed');
     }
   };
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <Sidebar language={language} setLanguage={setLanguage} />
+      <Sidebar audioType={synthesisState.audioType} setAudioType={(type) => setSynthesisState({...synthesisState, audioType: type})} />
       <ChatArea
-        messages={messages}
-        isListening={isListening}
-        onToggleMicrophone={toggleMicrophone}
-        onSendMessage={handleSendMessage}
+        text={synthesisState.text}
+        onTextChange={(text) => setSynthesisState({...synthesisState, text})}
         isLoading={isLoading}
+        onSynthesize={handleSynthesizeAudio}
+        onDownload={handleDownloadAudio}
+        lastAudioPath={lastAudioPath}
+        error={error}
+        success={success}
       />
       <ParametersPanel
-        mfeSteps={mfeSteps}
-        setMfeSteps={setMfeSteps}
-        speechRate={speechRate}
-        setSpeechRate={setSpeechRate}
+        audioType={synthesisState.audioType}
+        sampleRate={synthesisState.sampleRate}
+        setSampleRate={(rate) => setSynthesisState({...synthesisState, sampleRate: rate})}
+        refAudio={synthesisState.refAudio}
+        setRefAudio={(file) => setSynthesisState({...synthesisState, refAudio: file})}
+        refText={synthesisState.refText}
+        setRefText={(text) => setSynthesisState({...synthesisState, refText: text})}
       />
     </div>
   );

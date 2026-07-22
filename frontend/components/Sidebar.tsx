@@ -1,81 +1,74 @@
 'use client';
 
 interface SidebarProps {
-  language: string;
-  setLanguage: (lang: string) => void;
+  audioType: 'hindi' | 'marathi' | 'custom';
+  setAudioType: (type: 'hindi' | 'marathi' | 'custom') => void;
 }
 
-export default function Sidebar({ language, setLanguage }: SidebarProps) {
+export default function Sidebar({ audioType, setAudioType }: SidebarProps) {
   return (
-    <div className="w-52 bg-gradient-to-b from-yellow-300 to-yellow-400 border-r-4 border-black p-5 flex flex-col overflow-y-auto">
+    <div className="w-56 bg-gradient-to-b from-yellow-300 to-yellow-400 border-r-4 border-black p-5 flex flex-col overflow-y-auto">
       {/* Logo Section */}
       <div className="flex flex-col items-center pb-5 border-b-2 border-black/20 mb-6">
-        <div className="w-24 h-24 bg-white border-3 border-black rounded-lg flex items-center justify-center text-2xl mb-3">
-          👤
+        <div className="w-20 h-20 bg-white border-3 border-black rounded-lg flex items-center justify-center text-3xl mb-3">
+          🎵
         </div>
-        <h1 className="text-lg font-bold text-black">VĀNI AI</h1>
-        <p className="text-xs font-bold text-black uppercase tracking-widest">Premium Voice Assistant</p>
+        <h1 className="text-lg font-bold text-black">IndicF5 TTS</h1>
+        <p className="text-xs font-bold text-black uppercase tracking-widest">Voice Synthesis</p>
       </div>
 
-      {/* Menu Items */}
-      <nav className="flex flex-col gap-2 mb-8">
-        <MenuItem icon="📋" label="Recent Chats" />
-        <MenuItem icon="🎤" label="Voice Library" />
-        <MenuItem icon="📢" label="Voice Cloning" />
-        <MenuItem icon="⚙️" label="Regional Settings" />
-        <MenuItem icon="👤" label="Account" />
-      </nav>
-
-      {/* Language Focus */}
-      <div className="bg-white/30 rounded-lg p-3 mb-6">
-        <p className="text-xs font-bold text-black uppercase mb-2 tracking-widest">Language Focus</p>
-        <div className="flex gap-1">
+      {/* Audio Type Selection */}
+      <div className="bg-white/30 rounded-lg p-4 mb-8">
+        <p className="text-xs font-bold text-black uppercase mb-3 tracking-widest">Audio Type</p>
+        <div className="flex flex-col gap-2">
           <button
-            onClick={() => setLanguage('hi')}
-            className={`flex-1 py-1 px-2 text-xs font-bold border-2 border-black rounded transition-all ${
-              language === 'hi'
+            onClick={() => setAudioType('hindi')}
+            className={`py-2 px-3 text-xs font-bold border-2 border-black rounded transition-all ${
+              audioType === 'hindi'
                 ? 'bg-blue-600 text-white border-blue-600'
-                : 'bg-white text-black hover:bg-black hover:text-white'
+                : 'bg-white text-black hover:bg-blue-100'
             }`}
           >
-            HINDI
+            🇮🇳 Hindi
           </button>
           <button
-            onClick={() => setLanguage('mr')}
-            className={`flex-1 py-1 px-2 text-xs font-bold border-2 border-black rounded transition-all ${
-              language === 'mr'
-                ? 'bg-red-600 text-white border-red-600'
-                : 'bg-white text-black hover:bg-black hover:text-white'
+            onClick={() => setAudioType('marathi')}
+            className={`py-2 px-3 text-xs font-bold border-2 border-black rounded transition-all ${
+              audioType === 'marathi'
+                ? 'bg-orange-600 text-white border-orange-600'
+                : 'bg-white text-black hover:bg-orange-100'
             }`}
           >
-            MARATHI
+            🎭 Marathi
           </button>
           <button
-            onClick={() => setLanguage('auto')}
-            className={`flex-1 py-1 px-2 text-xs font-bold border-2 border-black rounded transition-all ${
-              language === 'auto'
-                ? 'bg-green-600 text-white border-green-600'
-                : 'bg-white text-black hover:bg-black hover:text-white'
+            onClick={() => setAudioType('custom')}
+            className={`py-2 px-3 text-xs font-bold border-2 border-black rounded transition-all ${
+              audioType === 'custom'
+                ? 'bg-purple-600 text-white border-purple-600'
+                : 'bg-white text-black hover:bg-purple-100'
             }`}
           >
-            AUTO
+            🎙️ Custom Voice
           </button>
         </div>
       </div>
 
-      {/* New Conversation Button */}
-      <button className="mt-auto w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg transition-all transform hover:scale-105 border-2 border-black uppercase tracking-wider flex items-center justify-center gap-2">
-        <span className="text-lg">+</span> New Conversation
-      </button>
-    </div>
-  );
-}
+      {/* Information Section */}
+      <div className="bg-white/40 rounded-lg p-3 mb-6">
+        <p className="text-xs font-bold text-black uppercase mb-2 tracking-widest">Status</p>
+        <div className="space-y-2 text-xs text-gray-800">
+          <div>📊 <span className="font-semibold">Model:</span> IndicF5</div>
+          <div>🗣️ <span className="font-semibold">Languages:</span> Hindi, Marathi</div>
+          <div>⚙️ <span className="font-semibold">Engine:</span> FastAPI</div>
+        </div>
+      </div>
 
-function MenuItem({ icon, label }: { icon: string; label: string }) {
-  return (
-    <div className="flex items-center gap-3 p-3 bg-white/30 hover:bg-white/60 rounded-lg cursor-pointer transition-all border-2 border-transparent hover:border-black">
-      <span className="text-lg">{icon}</span>
-      <span className="text-xs font-bold text-black">{label}</span>
+      {/* API Connection Info */}
+      <div className="mt-auto p-3 bg-yellow-300 border-2 border-black rounded-lg">
+        <p className="text-xs font-bold text-black text-center uppercase">🔌 API</p>
+        <p className="text-xs text-gray-800 text-center mt-1 font-mono">localhost:8000</p>
+      </div>
     </div>
   );
 }
