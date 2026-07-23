@@ -212,7 +212,6 @@ async def model_info():
     return {
         "model": "IndicF5",
         "supported_audio_types": ["hindi", "marathi", "custom"],
-        "supported_languages": ["hindi", "marathi"],
         "default_device": get_default_device()
     }
 

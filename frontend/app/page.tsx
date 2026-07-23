@@ -1,7 +1,7 @@
 ﻿"use client";
 
-import VaniAI from "@/components/VaniAI";
+import DhvaniAI from '@/components/dhvaniAI';
 
 export default function Home() {
-  return <VaniAI />;
+  return <DhvaniAI />;
 }
